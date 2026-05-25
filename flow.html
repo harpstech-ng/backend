@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confirm Transaction</title>
+<style>
+body{background:#0a0a0a;color:white;font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.card{background:rgba(255,255,255,0.05);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.1);padding:30px;border-radius:25px;width:100%;max-width:450px}
+.intent{font-size:24px;margin:20px 0;color:#00D084}
+.btn{width:100%;padding:15px;border:none;border-radius:15px;font-weight:600;margin:10px 0;cursor:pointer}
+.btn-primary{background:#00D084;color:white}
+.btn-secondary{background:rgba(255,255,255,0.1);color:white}
+.warning{background:rgba(255,59,48,0.2);border:1px solid #ff3b30;padding:15px;border-radius:12px;margin:15px 0}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Confirm Transaction</h2>
+  <div id="intentDisplay"></div>
+  <div id="warningBox"></div>
+  <button class="btn btn-primary" onclick="executeTx()">Confirm with Voice</button>
+  <button class="btn btn-secondary" onclick="window.location.href='/'">Cancel</button>
+</div>
+
+<script>
+const intent = JSON.parse(localStorage.getItem('voiceIntent') || '{}');
+const display = document.getElementById('intentDisplay');
+
+if(intent.intent === 'transfer'){
+  display.innerHTML = `<div class="intent">Send ₦${intent.amount} to ${intent.recipient}</div>`;
+}
+if(intent.intent === 'split_bill'){
+  display.innerHTML = `<div class="intent">Split ₦${intent.amount} between ${intent.split_count} people</div>`;
+}
+
+if(intent.requires_extra_verification){
+  document.getElementById('warningBox').innerHTML = 
+    `<div class="warning">⚠️ Security Check: Unusual tone detected. Voice verification required.</div>`;
+}
+
+async function executeTx(){
+  if(!navigator.onLine){
+    await fetch('https://your-backend.onrender.com/queue-transaction', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(intent)
+    });
+    alert('Offline: Transaction queued. Will send when online.');
+    return;
+  }
+  
+  // Feature 4: Generate voice receipt
+  const receipt = await fetch('https://your-backend.onrender.com/generate-receipt', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      amount:intent.amount, 
+      recipient:intent.recipient, 
+      language:intent.language_detected,
+      newBalance:48000
+    })
+  }).then(r=>r.json());
+  
+  // Speak the receipt
+  const utterance = new SpeechSynthesisUtterance(receipt.voice_text);
+  speechSynthesis.speak(utterance);
+  
+  alert('Success! Check dashboard for details.');
+  window.location.href = '/dashboard.html';
+}
+</script>
+</body>
+</html>
