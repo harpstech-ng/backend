@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harps VoicePay</title>
+<style>
+:root { --green: #00D084; --bg: #0a0a0a; --glass: rgba(255,255,255,0.05); }
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:white;font-family:-apple-system,Inter,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.container{background:var(--glass);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.1);padding:40px;border-radius:30px;width:100%;max-width:450px;text-align:center}
+.logo{font-weight:800;font-size:24px;color:var(--green);margin-bottom:10px}
+.mic-container{position:relative;width:140px;height:140px;margin:30px auto}
+.mic-btn{width:120px;height:120px;border-radius:50%;border:none;background:var(--green);font-size:50px;cursor:pointer;position:relative;z-index:2;transition:0.3s}
+.mic-btn.listening{animation:pulse 1.5s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(0,208,132,0.7)}70%{box-shadow:0 0 0 40px rgba(0,208,132,0)}100%{box-shadow:0 0 0 0 rgba(0,208,132,0)}}
+.quick-actions{display:grid;grid-cols:3;gap:10px;margin:20px 0}
+.action-btn{background:rgba(255,255,255,0.1);border:none;padding:15px;border-radius:15px;color:white;cursor:pointer}
+select{background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:white;padding:10px;border-radius:10px;width:100%;margin-top:15px}
+.status{margin-top:20px;color:var(--green);font-size:14px}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="logo">HARPS<span style="opacity:0.5">TECH</span></div>
+  <h1>VoicePay AI</h1>
+  <p>Say it in Pidgin, Yoruba, Hausa, Igbo, English</p>
+  
+  <div class="mic-container">
+    <button class="mic-btn" id="micBtn">🎤</button>
+  </div>
+  
+  <div class="quick-actions">
+    <button class="action-btn" onclick="quickCmd('Send 2k to Seyi')">Send</button>
+    <button class="action-btn" onclick="quickCmd('Pay my PHCN bill')">Bills</button>
+    <button class="action-btn" onclick="quickCmd('Buy 2GB data')">Airtime</button>
+  </div>
+  
+  <select id="language">
+    <option value="en">English</option>
+    <option value="pcm">Pidgin</option>
+    <option value="yo">Yoruba</option>
+    <option value="ha">Hausa</option>
+    <option value="ig">Igbo</option>
+  </select>
+  
+  <div class="status" id="status">Ready</div>
+  <div id="transcript" style="margin-top:10px;font-style:italic;color:#888"></div>
+</div>
+
+<script>
+const micBtn = document.getElementById('micBtn');
+let recognition;
+let isListening = false;
+
+if('webkitSpeechRecognition' in window){
+  recognition = new webkitSpeechRecognition();
+  recognition.continuous = false;
+  recognition.onresult = async (e) => {
+    const transcript = e.results[0][0].transcript;
+    document.getElementById('transcript').innerText = `"${transcript}"`;
+    document.getElementById('status').innerText = "Analyzing...";
+    
+    // Send to backend
+    const res = await fetch('https://your-backend.onrender.com/parse', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({transcript, userId:'user_123'})
+    });
+    const data = await res.json();
+    
+    // Redirect to flow page with data
+    localStorage.setItem('voiceIntent', JSON.stringify(data));
+    window.location.href = '/flow.html';
+  };
+}
+
+micBtn.onclick = () => {
+  if(!isListening){
+    recognition.start();
+    micBtn.classList.add('listening');
+    document.getElementById('status').innerText = "Listening...";
+    isListening = true;
+  } else {
+    recognition.stop();
+    micBtn.classList.remove('listening');
+    isListening = false;
+  }
+};
+
+function quickCmd(cmd){
+  document.getElementById('transcript').innerText = `"${cmd}"`;
+}
+</script>
+</body>
+</html>
