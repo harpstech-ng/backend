@@ -129,7 +129,7 @@ app.post("/create-opay-link", async (req, res) => {
 });
 
 // Health check
-app.get("/", (res, res) => res.json({ status: "Harps VoicePay backend live" }));
+app.get("/", (req, res) => res.json({ status: "Harps VoicePay backend live" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
