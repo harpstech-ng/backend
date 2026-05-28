@@ -16,9 +16,9 @@ app.use(express.json());
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-// Initialize Firebase Admin
+// Initialize Firebase Admin - Option 1: Application Default Credentials
 admin.initializeApp({
-  projectId: "harps-tech-95856"
+  projectId: process.env.FIREBASE_PROJECT_ID || "harps-tech-95856"
 });
 const db = admin.firestore();
 
@@ -129,7 +129,7 @@ app.post("/create-opay-link", async (req, res) => {
 });
 
 // Health check
-app.get("/", (req, res) => res.json({ status: "Harps VoicePay backend live" }));
+app.get("/", (res, res) => res.json({ status: "Harps VoicePay backend live" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
