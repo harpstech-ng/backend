@@ -12,9 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize Gemini - FINAL FIX: gemini-1.5-flash works on v1beta for all keys
+// SDK 0.1.3 uses v1 API where gemini-pro works for all keys
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
 // Initialize Firebase Admin - ADC for Workload Identity
 admin.initializeApp({
@@ -25,14 +25,12 @@ const db = admin.firestore();
 const SYSTEM_PROMPT = `You are VoicePay AI. Extract intents from speech. Return ONLY JSON:
 {"intent":"transfer|pay_bill|buy_airtime|split_bill|unknown","amount":number,"recipient":string,"split_count":number,"language_detected":"en|yo|ha|ig|pcm","tone":"calm|rushed|stressed","confidence":0-1}`;
 
-// Helper: Extract JSON from Gemini text safely
 function extractJSON(text) {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("No JSON in response: " + text);
   return JSON.parse(match[0]);
 }
 
-// 1. Parse voice intent + fraud check
 app.post("/parse", async (req, res) => {
   try {
     const { transcript } = req.body;
@@ -48,11 +46,10 @@ app.post("/parse", async (req, res) => {
     res.json(json);
   } catch (e) {
     console.error("Parse error full:", e);
-    res.status(500).json({ error: e.message, details: e.toString() });
+    res.status(500).json({ error: e.message });
   }
 });
 
-// 2. Save user data encrypted
 app.post("/save-user", async (req, res) => {
   try {
     const { userId, phone, voiceEmbedding } = req.body;
@@ -68,7 +65,6 @@ app.post("/save-user", async (req, res) => {
   }
 });
 
-// 3. Generate voice receipt text
 app.post("/generate-receipt", async (req, res) => {
   try {
     const { amount, recipient, language } = req.body;
@@ -81,15 +77,12 @@ app.post("/generate-receipt", async (req, res) => {
   }
 });
 
-// 4. Gemini talks back - for Opay competition
 app.post("/speak", async (req, res) => {
   try {
     const { text, language = "en" } = req.body;
     const prompt = `Convert this to 1 short friendly confirmation sentence in ${language}, under 12 words: ${text}`;
     const result = await model.generateContent(prompt);
     const voiceText = result.response.text().replace(/"/g, "").trim();
-
-    // Frontend can use Web Speech API to speak this text
     res.json({ voice_text: voiceText });
   } catch (e) {
     console.error("Speak error:", e);
@@ -97,11 +90,9 @@ app.post("/speak", async (req, res) => {
   }
 });
 
-// 5. Create Opay payment link
 app.post("/create-opay-link", async (req, res) => {
   try {
     const { amount, recipient, narration, userId } = req.body;
-
     const merchantId = process.env.OPAY_MERCHANT_ID;
     const secretKey = process.env.OPAY_SECRET_KEY;
     const reference = `voicepay_${Date.now()}_${userId}`;
@@ -131,24 +122,12 @@ app.post("/create-opay-link", async (req, res) => {
     } else {
       res.status(400).json({ error: response.data.message });
     }
-
   } catch (e) {
     console.error("Opay error:", e.response?.data || e.message);
     res.status(500).json({ error: "Failed to create payment link" });
   }
 });
 
-// 6. Debug: List available Gemini models for your key
-app.get("/models", async (req, res) => {
-  try {
-    const { models } = await genAI.listModels();
-    res.json(models.map(m => ({ name: m.name, methods: m.supportedGenerationMethods })));
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Health check
 app.get("/", (req, res) => res.json({ status: "Harps VoicePay backend live" }));
 
 const PORT = process.env.PORT || 3000;
