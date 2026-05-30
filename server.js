@@ -12,9 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize Gemini - FIXED MODEL NAME
+// Initialize Gemini - FIXED: Use gemini-pro for max compatibility
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
 // Initialize Firebase Admin - ADC for Workload Identity
 admin.initializeApp({
@@ -47,8 +47,8 @@ app.post("/parse", async (req, res) => {
     }
     res.json(json);
   } catch (e) {
-    console.error("Parse error:", e);
-    res.status(500).json({ error: e.message });
+    console.error("Parse error full:", e);
+    res.status(500).json({ error: e.message, details: e.toString() });
   }
 });
 
@@ -142,4 +142,4 @@ app.post("/create-opay-link", async (req, res) => {
 app.get("/", (req, res) => res.json({ status: "Harps VoicePay backend live" }));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>  console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
