@@ -12,9 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// SDK 0.1.3 + gemini-1.0-pro + AIzaSy key = works in 2026
+// SDK 0.21.0 uses v1beta + gemini-1.5-flash-latest = works with all AI Studio keys
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
 // Initialize Firebase Admin - ADC for Workload Identity
 admin.initializeApp({
@@ -113,7 +113,7 @@ app.post("/create-opay-link", async (req, res) => {
 
     const response = await axios.post(
       "https://sandbox.opaycheckout.com/api/v3/payment/link/create",
-      payload, 
+      payload,
       { headers: { "Authorization": `Bearer ${merchantId}`, "Content-Type": "application/json", "Timestamp": timestamp, "Signature": signature } }
     );
 
