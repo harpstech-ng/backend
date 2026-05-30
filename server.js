@@ -12,9 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize Gemini - FIXED: Use gemini-pro for max compatibility
+// Initialize Gemini - FINAL FIX: gemini-1.5-flash works on v1beta for all keys
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 // Initialize Firebase Admin - ADC for Workload Identity
 admin.initializeApp({
@@ -81,7 +81,7 @@ app.post("/generate-receipt", async (req, res) => {
   }
 });
 
-// 4. NEW: Gemini talks back - for Opay competition
+// 4. Gemini talks back - for Opay competition
 app.post("/speak", async (req, res) => {
   try {
     const { text, language = "en" } = req.body;
@@ -135,6 +135,16 @@ app.post("/create-opay-link", async (req, res) => {
   } catch (e) {
     console.error("Opay error:", e.response?.data || e.message);
     res.status(500).json({ error: "Failed to create payment link" });
+  }
+});
+
+// 6. Debug: List available Gemini models for your key
+app.get("/models", async (req, res) => {
+  try {
+    const { models } = await genAI.listModels();
+    res.json(models.map(m => ({ name: m.name, methods: m.supportedGenerationMethods })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
