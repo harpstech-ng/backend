@@ -12,9 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Initialize Gemini
+// Initialize Gemini - FIXED MODEL NAME
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
 // Initialize Firebase Admin - ADC for Workload Identity
 admin.initializeApp({
@@ -36,6 +36,8 @@ function extractJSON(text) {
 app.post("/parse", async (req, res) => {
   try {
     const { transcript } = req.body;
+    if (!transcript) return res.status(400).json({ error: "transcript is required" });
+
     const result = await model.generateContent(`${SYSTEM_PROMPT}\n\nUser: ${transcript}`);
     let text = result.response.text().trim();
     let json = extractJSON(text);
@@ -45,7 +47,7 @@ app.post("/parse", async (req, res) => {
     }
     res.json(json);
   } catch (e) {
-    console.error("Parse error:", e.message);
+    console.error("Parse error:", e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -61,6 +63,7 @@ app.post("/save-user", async (req, res) => {
     });
     res.json({ success: true });
   } catch (e) {
+    console.error("Save user error:", e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -73,6 +76,7 @@ app.post("/generate-receipt", async (req, res) => {
     const result = await model.generateContent(prompt);
     res.json({ voice_text: result.response.text().trim() });
   } catch (e) {
+    console.error("Receipt error:", e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -88,7 +92,7 @@ app.post("/speak", async (req, res) => {
     // Frontend can use Web Speech API to speak this text
     res.json({ voice_text: voiceText });
   } catch (e) {
-    console.error("Speak error:", e.message);
+    console.error("Speak error:", e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -138,4 +142,4 @@ app.post("/create-opay-link", async (req, res) => {
 app.get("/", (req, res) => res.json({ status: "Harps VoicePay backend live" }));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () =>  console.log(`Server running on port ${PORT}`));
