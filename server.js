@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import axios from "axios";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import admin from "firebase-admin";
 import { encrypt, decrypt } from "./encryption.js";
 
@@ -12,9 +12,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// FIXED: Use gemini-2.0-flash-lite - FREE tier works
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+// FIXED: Use Groq - 100% FREE, no card needed, faster than Gemini
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // Initialize Firebase Admin - ADC for Workload Identity
 admin.initializeApp({
@@ -31,14 +30,22 @@ function extractJSON(text) {
   return JSON.parse(match[0]);
 }
 
+async function chat(prompt) {
+  const completion = await groq.chat.completions.create({
+    messages: [{ role: "user", content: prompt }],
+    model: "llama-3.1-8b-instant",
+    temperature: 0.3,
+  });
+  return completion.choices[0]?.message?.content || "";
+}
+
 app.post("/parse", async (req, res) => {
   try {
     const { transcript } = req.body;
     if (!transcript) return res.status(400).json({ error: "transcript is required" });
 
-    const result = await model.generateContent(`${SYSTEM_PROMPT}\n\nUser: ${transcript}`);
-    let text = result.response.text().trim();
-    let json = extractJSON(text);
+    const text = await chat(`${SYSTEM_PROMPT}\n\nUser: ${transcript}`);
+    let json = extractJSON(text.trim());
 
     if (["stressed", "rushed"].includes(json.tone) && json.intent === "transfer") {
       json.requires_extra_verification = true;
@@ -69,8 +76,8 @@ app.post("/generate-receipt", async (req, res) => {
   try {
     const { amount, recipient, language } = req.body;
     const prompt = `Generate a short voice receipt in ${language} for: Sent ₦${amount} to ${recipient}. Under 15 words, sound friendly.`;
-    const result = await model.generateContent(prompt);
-    res.json({ voice_text: result.response.text().trim() });
+    const text = await chat(prompt);
+    res.json({ voice_text: text.trim() });
   } catch (e) {
     console.error("Receipt error:", e);
     res.status(500).json({ error: e.message });
@@ -83,9 +90,8 @@ app.post("/speak", async (req, res) => {
     if (!text) return res.status(400).json({ error: "text is required" });
 
     const prompt = `You are Harps VoicePay AI. Reply to the user in ${language}. Keep it under 12 words, friendly and natural. User said: "${text}"`;
-    const result = await model.generateContent(prompt);
-    const voiceText = result.response.text().replace(/"/g, "").trim();
-    res.json({ voice_text: voiceText });
+    const voiceText = await chat(prompt);
+    res.json({ voice_text: voiceText.replace(/"/g, "").trim() });
   } catch (e) {
     console.error("Speak error:", e);
     res.status(500).json({ error: e.message });
