@@ -12,9 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Fixed: Use gemini-1.5-flash - no "-latest"
+// FINAL FIX: gemini-1.5-flash is dead. Use gemini-2.0-flash
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 // Initialize Firebase Admin - ADC for Workload Identity
 admin.initializeApp({
