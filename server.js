@@ -12,16 +12,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// FIXED: Use Groq - 100% FREE, no card needed, faster than Gemini
+// Groq - 100% FREE, 300ms response time
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// Initialize Firebase Admin - ADC for Workload Identity
+// Initialize Firebase Admin
 admin.initializeApp({
   projectId: process.env.FIREBASE_PROJECT_ID
 });
 const db = admin.firestore();
 
-const SYSTEM_PROMPT = `You are VoicePay AI. Extract intents from speech. Return ONLY JSON:
+const SYSTEM_PROMPT = `You are VoicePay AI for Opay Nigeria. Extract intents from speech. ALWAYS use Naira ₦, never dollars $. Return ONLY JSON:
 {"intent":"transfer|pay_bill|buy_airtime|split_bill|unknown","amount":number,"recipient":string,"split_count":number,"language_detected":"en|yo|ha|ig|pcm","tone":"calm|rushed|stressed","confidence":0-1}`;
 
 function extractJSON(text) {
@@ -75,7 +75,7 @@ app.post("/save-user", async (req, res) => {
 app.post("/generate-receipt", async (req, res) => {
   try {
     const { amount, recipient, language } = req.body;
-    const prompt = `Generate a short voice receipt in ${language} for: Sent ₦${amount} to ${recipient}. Under 15 words, sound friendly.`;
+    const prompt = `You are Harps for Opay Nigeria. Generate a short voice receipt in ${language === 'yo' ? 'Yoruba' : language === 'ha' ? 'Hausa' : language === 'ig' ? 'Igbo' : 'Nigerian English'}. MUST use ₦ symbol. Format: "Sent ₦${amount} to ${recipient}". Under 12 words, friendly.`;
     const text = await chat(prompt);
     res.json({ voice_text: text.trim() });
   } catch (e) {
@@ -89,7 +89,16 @@ app.post("/speak", async (req, res) => {
     const { text, language = "en" } = req.body;
     if (!text) return res.status(400).json({ error: "text is required" });
 
-    const prompt = `You are Harps VoicePay AI. Reply to the user in ${language}. Keep it under 12 words, friendly and natural. User said: "${text}"`;
+    const langMap = {
+      'yo': 'Yoruba',
+      'ha': 'Hausa', 
+      'ig': 'Igbo',
+      'en': 'Nigerian Pidgin/English',
+      'pcm': 'Nigerian Pidgin'
+    };
+
+    const prompt = `You are Harps, Opay's voice assistant for Nigeria. CRITICAL: Always use Naira ₦ symbol, NEVER dollar $. Reply in ${langMap[language] || 'Nigerian English'}. Under 15 words, friendly, conversational. If confirming money, use format "₦5000 to Mama". No emojis. User said: "${text}"`;
+    
     const voiceText = await chat(prompt);
     res.json({ voice_text: voiceText.replace(/"/g, "").trim() });
   } catch (e) {
@@ -136,7 +145,7 @@ app.post("/create-opay-link", async (req, res) => {
   }
 });
 
-app.get("/", (req, res) => res.json({ status: "Harps VoicePay backend live" }));
+app.get("/", (req, res) => res.json({ status: "Harps VoicePay backend live with Groq" }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
