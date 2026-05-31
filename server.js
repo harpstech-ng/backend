@@ -12,9 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// SDK 0.21.0 uses v1beta + gemini-1.5-flash-latest = works with all AI Studio keys
+// Fixed: Use gemini-1.5-flash - no "-latest"
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 // Initialize Firebase Admin - ADC for Workload Identity
 admin.initializeApp({
