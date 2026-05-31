@@ -12,9 +12,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// FINAL FIX: gemini-1.5-flash is dead. Use gemini-2.0-flash
+// FIXED: Use gemini-2.0-flash-lite - FREE tier works
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
 
 // Initialize Firebase Admin - ADC for Workload Identity
 admin.initializeApp({
@@ -80,7 +80,9 @@ app.post("/generate-receipt", async (req, res) => {
 app.post("/speak", async (req, res) => {
   try {
     const { text, language = "en" } = req.body;
-    const prompt = `Convert this to 1 short friendly confirmation sentence in ${language}, under 12 words: ${text}`;
+    if (!text) return res.status(400).json({ error: "text is required" });
+
+    const prompt = `You are Harps VoicePay AI. Reply to the user in ${language}. Keep it under 12 words, friendly and natural. User said: "${text}"`;
     const result = await model.generateContent(prompt);
     const voiceText = result.response.text().replace(/"/g, "").trim();
     res.json({ voice_text: voiceText });
