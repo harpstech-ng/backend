@@ -5,14 +5,21 @@ import crypto from "crypto";
 import axios from "axios";
 import Groq from "groq-sdk";
 import admin from "firebase-admin";
-import { encrypt, decrypt } from "./encryption.js";
 
 dotenv.config();
 const app = express();
-app.use(cors());
+
+// Fixed CORS - allows GitHub Pages
+app.use(cors({
+  origin: ['https://harpstech-ng.github.io', 'http://localhost:3000', 'http://127.0.0.1:5500'],
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
-// Groq - 100% FREE, 300ms response time
+// Handle preflight
+app.options('*', cors());
+
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // Initialize Firebase Admin
@@ -50,36 +57,13 @@ app.post("/parse", async (req, res) => {
     if (["stressed", "rushed"].includes(json.tone) && json.intent === "transfer") {
       json.requires_extra_verification = true;
     }
+
+    // Add response field so Harps can talk
+    json.response = `Got it. Sending ₦${json.amount || 0} to ${json.recipient || 'recipient'}.`;
+
     res.json(json);
   } catch (e) {
     console.error("Parse error full:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post("/save-user", async (req, res) => {
-  try {
-    const { userId, phone, voiceEmbedding } = req.body;
-    await db.collection('users').doc(userId).set({
-      phone_encrypted: encrypt(phone, process.env.AES_SECRET_KEY),
-      voice_embedding_encrypted: encrypt(voiceEmbedding, process.env.AES_SECRET_KEY),
-      created_at: Date.now()
-    });
-    res.json({ success: true });
-  } catch (e) {
-    console.error("Save user error:", e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post("/generate-receipt", async (req, res) => {
-  try {
-    const { amount, recipient, language } = req.body;
-    const prompt = `You are Harps for Opay Nigeria. Generate a short voice receipt in ${language === 'yo' ? 'Yoruba' : language === 'ha' ? 'Hausa' : language === 'ig' ? 'Igbo' : 'Nigerian English'}. MUST use ₦ symbol. Format: "Sent ₦${amount} to ${recipient}". Under 12 words, friendly.`;
-    const text = await chat(prompt);
-    res.json({ voice_text: text.trim() });
-  } catch (e) {
-    console.error("Receipt error:", e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -91,18 +75,30 @@ app.post("/speak", async (req, res) => {
 
     const langMap = {
       'yo': 'Yoruba',
-      'ha': 'Hausa', 
+      'ha': 'Hausa',
       'ig': 'Igbo',
       'en': 'Nigerian Pidgin/English',
       'pcm': 'Nigerian Pidgin'
     };
 
     const prompt = `You are Harps, Opay's voice assistant for Nigeria. CRITICAL: Always use Naira ₦ symbol, NEVER dollar $. Reply in ${langMap[language] || 'Nigerian English'}. Under 15 words, friendly, conversational. If confirming money, use format "₦5000 to Mama". No emojis. User said: "${text}"`;
-    
+
     const voiceText = await chat(prompt);
     res.json({ voice_text: voiceText.replace(/"/g, "").trim() });
   } catch (e) {
     console.error("Speak error:", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/generate-receipt", async (req, res) => {
+  try {
+    const { amount, recipient, language } = req.body;
+    const prompt = `You are Harps for Opay Nigeria. Generate a short voice receipt in ${language === 'yo'? 'Yoruba' : language === 'ha'? 'Hausa' : language === 'ig'? 'Igbo' : 'Nigerian English'}. MUST use ₦ symbol. Format: "Sent ₦${amount} to ${recipient}". Under 12 words, friendly.`;
+    const text = await chat(prompt);
+    res.json({ voice_text: text.trim() });
+  } catch (e) {
+    console.error("Receipt error:", e);
     res.status(500).json({ error: e.message });
   }
 });
