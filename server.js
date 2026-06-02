@@ -34,7 +34,7 @@ const bucket = storage.bucket();
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 }
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB for voice files
 });
 
 function extractJSON(text) {
@@ -47,44 +47,97 @@ async function chat(prompt) {
   const completion = await groq.chat.completions.create({
     messages: [{ role: "user", content: prompt }],
     model: "llama-3.1-8b-instant",
-    temperature: 0.2,
+    temperature: 0.1, // Lower = more consistent
   });
   return completion.choices[0]?.message?.content || "";
 }
 
-// VOICE PARSING + FRAUD DETECTION
+// VOICE PARSING + FRAUD DETECTION - UPGRADED FOR NIGERIAN SPEECH
 app.post("/parse", async (req, res) => {
   try {
     const { transcript } = req.body;
     if (!transcript) return res.status(400).json({ error: "transcript is required" });
 
-    const SYSTEM_PROMPT = `You are Harps, Opay Nigeria's voice payment AI. Extract payment details from Nigerian speech with 100% accuracy.
+    console.log('[HARPS] User said:', transcript);
 
-CRITICAL RULES:
-1. Nigerian amounts: "5k"=5000, "2.5k"=2500, "1m"=1000000, "50 naira"=50, "two thousand"=2000
-2. Names: Seyi, Tunde, Mama, Papa, John, Chioma, Amina = recipient
-3. If amount OR recipient unclear, set confidence < 0.7
-4. ALWAYS use ₦ Naira, never $ dollar
-5. Detect language: en, yo, ha, ig, pcm
-6. Detect tone: calm, rushed, stressed
-7. Return ONLY valid JSON, no extra text
+    const SYSTEM_PROMPT = `You are Harps, Opay Nigeria's voice payment AI. Extract payment details from ANY Nigerian speech, including broken English, Pidgin, Yoruba, Hausa, Igbo.
 
-Output JSON: {"intent":"transfer|pay_bill|buy_airtime|split_bill|unknown","amount":number,"recipient":string,"language_detected":"en|yo|ha|ig|pcm","tone":"calm|rushed|stressed","confidence":0-1,"response":"short reply under 12 words","needs_confirmation":boolean}`;
+CRITICAL NIGERIAN SPEECH RULES:
+1. Amounts: "5k"=5000, "2.5k"=2500, "1m"=1000000, "50 naira"=50, "two thousand"=2000, "five"=5000 if money context, "ten"=10000
+2. Names: Seyi, Tunde, Mama, Papa, John, Chioma, Amina, Kissy, Kemi, Bola, David, Emeka, Fatima = recipient
+3. Verbs: "Send", "Give", "Transfer", "Pay", "Dash", "Credit" = transfer intent. "Fi", "Tura", "Zika" = transfer in Yoruba/Hausa
+4. "Airtime", "Data", "Recharge", "Card" = buy_airtime
+5. "NEPA", "PHCN", "Electricity", "Light bill", "EKEDC" = pay_bill
+6. Greetings: "how are you", "good morning", "bawo ni" = intent:"chitchat"
+7. Random talk: "I am on my way", "the weather is nice" = intent:"unknown"
+8. ALWAYS use ₦ Naira, never $
+9. Detect language: en, yo, ha, ig, pcm - handle mixed: "Fi 5k ranṣẹ si Seyi" = yo
+10. If user says "five Kissy shoes" but context is money, interpret as 5000 to Kissy
+11. If amount OR recipient missing, set confidence < 0.7
+12. Return ONLY valid JSON, no extra text
+
+Output JSON: {"intent":"transfer|pay_bill|buy_airtime|split_bill|chitchat|unknown","amount":number,"recipient":string,"language_detected":"en|yo|ha|ig|pcm","tone":"calm|rushed|stressed","confidence":0-1,"response":"short reply under 12 words","needs_confirmation":boolean}
+
+EXAMPLES:
+"Send 5k to Seyi" → {"intent":"transfer","amount":5000,"recipient":"Seyi","confidence":1.0,"language_detected":"en"}
+"Fi 2k ranṣẹ si Mama" → {"intent":"transfer","amount":2000,"recipient":"Mama","language_detected":"yo","confidence":1.0}
+"Tura dubu biyu zuwa Tunde" → {"intent":"transfer","amount":2000,"recipient":"Tunde","language_detected":"ha","confidence":1.0}
+"Send five to Kissy" → {"intent":"transfer","amount":5000,"recipient":"Kissy","confidence":0.9}
+"Buy 2k airtime" → {"intent":"buy_airtime","amount":2000,"confidence":1.0}
+"How are you" → {"intent":"chitchat","confidence":1.0,"response":"I am good! Want to send money?"}
+"Send five Kissy shoes" → {"intent":"transfer","amount":5000,"recipient":"Kissy","confidence":0.6,"response":"Send ₦5,000 to Kissy?","needs_confirmation":true}`;
 
     const text = await chat(`${SYSTEM_PROMPT}\n\nUser speech: "${transcript}"`);
+    console.log('[HARPS] Groq raw:', text);
     let json = extractJSON(text.trim());
 
-    if (!json.amount ||!json.recipient || json.recipient === "recipient") {
-      json.confidence = 0.3;
+    // Handle chitchat first
+    if (json.intent === "chitchat") {
+      json.response = json.response || "I am good! Want to send money?";
+      json.needs_confirmation = false;
+      json.confidence = 1.0;
+      console.log('[HARPS] Parsed:', json);
+      return res.json(json);
+    }
+
+    // Fallback logic for transfers
+    if (json.intent === "transfer") {
+      if (!json.amount ||!json.recipient) {
+        json.confidence = 0.4;
+        json.needs_confirmation = true;
+        json.intent = "unknown";
+        json.response = `I heard "${transcript}". Try: 'Send 5000 to Seyi'`;
+      } else if (json.confidence >= 0.7) {
+        json.needs_confirmation = false;
+        json.response = `Send ₦${json.amount.toLocaleString()} to ${json.recipient}? Tap Confirm.`;
+      } else {
+        json.needs_confirmation = true;
+        json.response = `Did you mean send ₦${json.amount.toLocaleString()} to ${json.recipient}?`;
+      }
+    } else if (json.intent === "buy_airtime") {
+      if (!json.amount) {
+        json.confidence = 0.4;
+        json.needs_confirmation = true;
+        json.response = `How much airtime? Say 'Buy 2k airtime'`;
+      } else {
+        json.needs_confirmation = false;
+        json.response = `Buy ₦${json.amount.toLocaleString()} airtime? Tap Confirm.`;
+      }
+    } else if (json.intent === "pay_bill") {
+      if (!json.amount) {
+        json.confidence = 0.4;
+        json.needs_confirmation = true;
+        json.response = `How much for the bill?`;
+      } else {
+        json.needs_confirmation = false;
+        json.response = `Pay ₦${json.amount.toLocaleString()} bill? Tap Confirm.`;
+      }
+    } else {
+      // Unknown
+      json.confidence = 0.2;
       json.needs_confirmation = true;
       json.intent = "unknown";
       json.response = `I heard "${transcript}". Say: 'Send 5000 to Seyi'`;
-    } else if (json.confidence >= 0.7) {
-      json.needs_confirmation = false;
-      json.response = `Send ₦${json.amount.toLocaleString()} to ${json.recipient}? Tap Confirm.`;
-    } else {
-      json.needs_confirmation = true;
-      json.response = `Did you mean send ₦${json.amount.toLocaleString()} to ${json.recipient}?`;
     }
 
     // FRAUD DETECTION: Stressed voice + large amount
@@ -98,6 +151,7 @@ Output JSON: {"intent":"transfer|pay_bill|buy_airtime|split_bill|unknown","amoun
       json.fraud_risk = "medium";
     }
 
+    console.log('[HARPS] Parsed:', json);
     res.json(json);
   } catch (e) {
     console.error("[HARPS] Parse error:", e);
@@ -144,7 +198,7 @@ app.post("/complete-signup", upload.array('voice', 3), async (req, res) => {
       voiceprint_created: Date.now(),
       created_at: Date.now(),
       status: 'active',
-      kyc_method: 'voice_biometric' // For Opay judges to see
+      kyc_method: 'voice_biometric'
     });
 
     res.json({
@@ -162,7 +216,7 @@ app.post("/complete-signup", upload.array('voice', 3), async (req, res) => {
 // CREATE OPAY LINK + STUDENT LIMIT CHECK
 app.post("/create-opay-link", async (req, res) => {
   try {
-    const { amount, recipient, narration, userId } = req.body;
+    const { amount, recipient, narration, userId, bank, account_number } = req.body;
 
     if (!amount ||!recipient ||!userId) {
       return res.status(400).json({ error: "amount, recipient, and userId required" });
@@ -197,7 +251,7 @@ app.post("/create-opay-link", async (req, res) => {
         name: "Harps VoicePay Transfer",
         description: narration || `Transfer to ${recipient}`
       },
-      recipientAccount: { name: recipient, accountNumber: "" }
+      recipientAccount: { name: recipient, accountNumber: account_number || "" }
     };
 
     const stringToSign = JSON.stringify(payload) + timestamp + secretKey;
@@ -221,6 +275,7 @@ app.post("/create-opay-link", async (req, res) => {
         userId: userId,
         amount: amount,
         recipient: recipient,
+        bank: bank || "",
         status: 'pending',
         opay_reference: reference,
         created_at: Date.now()
@@ -270,10 +325,10 @@ app.post("/dispute-transaction", async (req, res) => {
 
 app.get("/", (req, res) => res.json({
   status: "Harps VoicePay live",
-  version: "3.0 - Voice Biometrics Only",
+  version: "3.1 - Nigerian Voice AI",
   features: [
     "VoicePrint authentication",
-    "Age declaration for students",
+    "Yoruba/Hausa/Igbo support",
     "Tone-based fraud detection",
     "Opay payment links",
     "Student ₦10k limits"
