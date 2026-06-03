@@ -198,7 +198,7 @@ EXAMPLES:
   }
 });
 
-// CREATE OPAY LINK - FIXED FOR OPAY 02001 ERROR
+// CREATE OPAY LINK - DEBUGGED + FIXED
 app.post("/create-opay-link", async (req, res) => {
   try {
     const { amount, recipient, narration, userId, bank, account_number } = req.body;
@@ -221,37 +221,45 @@ app.post("/create-opay-link", async (req, res) => {
     const reference = `harps_${Date.now()}_${userId.substring(0, 8)}`;
     const timestamp = Date.now().toString();
 
-    // FIX: Opay requires ALL numbers as strings
+    // FIX 1: Ensure callbackUrl exists - Opay rejects null/undefined
+    const callbackUrl = process.env.OPAY_CALLBACK_URL || 'https://harps-voicepay.onrender.com/opay-callback';
+    const returnUrl = process.env.OPAY_RETURN_URL || 'https://harpstech-ng.github.io/HarpsPay/dashboard.html';
+
+    // FIX 2: Opay cashier payload - ALL numbers must be strings
     const payload = {
       country: "NG",
       reference: reference,
-      amount: Math.round(amount * 100).toString(), // String not number
+      amount: String(Math.round(amount * 100)), // Must be string
       currency: "NGN",
-      payMethod: "bankaccount", // Required
+      payMethod: "", // FIX 3: Empty string for all methods, not "bankaccount"
       productList: [
         {
           productId: "harps_transfer",
           name: "Harps VoicePay Transfer",
           description: narration || `Transfer to ${recipient}`,
-          price: Math.round(amount * 100).toString(), // String
+          price: String(Math.round(amount * 100)), // String
           quantity: "1" // String
         }
       ],
-      returnUrl: process.env.OPAY_RETURN_URL || 'https://harpstech-ng.github.io/HarpsPay/dashboard.html',
-      callbackUrl: process.env.OPAY_CALLBACK_URL,
-      userRequestIp: req.ip || "127.0.0.1", // Correct field name
-      expireAt: "30" // String not number
+      returnUrl: returnUrl,
+      callbackUrl: callbackUrl, // FIX 4: Never undefined
+      userRequestIp: req.headers['x-forwarded-for'] || req.socket.remoteAddress || "127.0.0.1",
+      expireAt: "30" // String
     };
 
+    console.log('[OPAY] Payload to sign:', JSON.stringify(payload));
+    
     const stringToSign = JSON.stringify(payload) + timestamp + secretKey;
     const signature = crypto.createHash('sha512').update(stringToSign).digest('hex');
+
+    console.log('[OPAY] Headers:', { merchantId, timestamp, signature: signature.substring(0,20) + '...' });
 
     const response = await axios.post(
       "https://sandboxapi.opaycheckout.com/api/v1/international/cashier/create",
       payload,
       {
         headers: {
-          "Authorization": `Bearer ${secretKey}`, // Use secretKey
+          "Authorization": `Bearer ${secretKey}`,
           "MerchantId": merchantId,
           "Content-Type": "application/json",
           "Timestamp": timestamp,
@@ -259,6 +267,8 @@ app.post("/create-opay-link", async (req, res) => {
         }
       }
     );
+
+    console.log('[OPAY] Response:', response.data);
 
     if (response.data.code === "00000") {
       await saveToFirestore('transactions', reference, {
@@ -292,6 +302,12 @@ app.post("/create-opay-link", async (req, res) => {
   }
 });
 
+// Add dummy callback so Opay doesn't 404
+app.post("/opay-callback", (req, res) => {
+  console.log('[OPAY] Callback received:', req.body);
+  res.json({ status: "success" });
+});
+
 app.get("/get-user/:userId", async (req, res) => {
   try {
     const userData = await getFromFirestore('users', req.params.userId);
@@ -304,7 +320,7 @@ app.get("/get-user/:userId", async (req, res) => {
 
 app.get("/", (req, res) => res.json({
   status: "Harps VoicePay live",
-  version: "4.2 - Opay Fixed",
+  version: "4.3 - Opay 02001 Fixed",
   features: [
     "Firestore REST API",
     "Nigerian Elder Speech AI",
