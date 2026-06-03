@@ -201,7 +201,7 @@ EXAMPLES:
   }
 });
 
-// CREATE OPAY LINK + STUDENT LIMIT CHECK
+// CREATE OPAY LINK + STUDENT LIMIT CHECK - FIXED URL
 app.post("/create-opay-link", async (req, res) => {
   try {
     const { amount, recipient, narration, userId, bank, account_number } = req.body;
@@ -241,8 +241,9 @@ app.post("/create-opay-link", async (req, res) => {
     const stringToSign = JSON.stringify(payload) + timestamp + secretKey;
     const signature = crypto.createHash('sha512').update(stringToSign).digest('hex');
 
+    // FIXED: Real Opay Sandbox URL
     const response = await axios.post(
-      "https://sandbox.opaycheckout.com/api/v3/payment/link/create",
+      "https://testapi.opayweb.com/api/v3/payment/link/create",
       payload,
       {
         headers: {
@@ -265,9 +266,12 @@ app.post("/create-opay-link", async (req, res) => {
         created_at: Date.now()
       });
 
+      // FIXED: Handle both response formats from Opay
+      const paymentUrl = response.data.data?.linkUrl || response.data.paymentUrl;
+      
       res.json({
         success: true,
-        paymentUrl: response.data.paymentUrl,
+        paymentUrl: paymentUrl,
         reference: reference
       });
     } else {
@@ -294,7 +298,7 @@ app.get("/get-user/:userId", async (req, res) => {
 
 app.get("/", (req, res) => res.json({
   status: "Harps VoicePay live",
-  version: "3.8 - No Admin SDK",
+  version: "3.9 - Fixed Opay URL",
   features: [
     "Firestore REST API",
     "Nigerian Elder Speech AI",
