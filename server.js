@@ -4,9 +4,6 @@ import dotenv from "dotenv";
 import crypto from "crypto";
 import axios from "axios";
 import Groq from "groq-sdk";
-import { initializeApp, applicationDefault } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-import { getStorage } from 'firebase-admin/storage';
 import multer from "multer";
 
 dotenv.config();
@@ -22,16 +19,50 @@ app.options('*', cors());
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// FIREBASE INIT - OPTION 2: WORKLOAD IDENTITY - NO KEYS NEEDED
-initializeApp({
-  credential: applicationDefault(),
-  projectId: process.env.FIREBASE_PROJECT_ID,
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET
-});
+// FIREBASE REST API - NO ADMIN SDK NEEDED
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
+const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
 
-const db = getFirestore();
-const storage = getStorage();
-const bucket = storage.bucket();
+// Helper to save to Firestore without Admin SDK
+async function saveToFirestore(collection, docId, data) {
+  const url = `${FIRESTORE_URL}/${collection}/${docId}`;
+  const firestoreData = {
+    fields: Object.keys(data).reduce((acc, key) => {
+      const value = data[key];
+      if (typeof value === 'string') acc[key] = { stringValue: value };
+      else if (typeof value === 'number') acc[key] = { integerValue: value.toString() };
+      else if (typeof value === 'boolean') acc[key] = { booleanValue: value };
+      else if (Array.isArray(value)) acc[key] = { arrayValue: { values: value.map(v => ({ stringValue: v })) } };
+      else acc[key] = { stringValue: JSON.stringify(value) };
+      return acc;
+    }, {})
+  };
+  
+  try {
+    await axios.patch(url, firestoreData);
+  } catch (e) {
+    console.error('Firestore save error:', e.response?.data || e.message);
+  }
+}
+
+// Helper to get from Firestore
+async function getFromFirestore(collection, docId) {
+  try {
+    const url = `${FIRESTORE_URL}/${collection}/${docId}`;
+    const res = await axios.get(url);
+    const fields = res.data.fields;
+    const data = {};
+    for (const key in fields) {
+      if (fields[key].stringValue) data[key] = fields[key].stringValue;
+      else if (fields[key].integerValue) data[key] = parseInt(fields[key].integerValue);
+      else if (fields[key].booleanValue) data[key] = fields[key].booleanValue;
+      else if (fields[key].arrayValue) data[key] = fields[key].arrayValue.values?.map(v => v.stringValue) || [];
+    }
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -170,167 +201,7 @@ EXAMPLES:
   }
 });
 
-// FEATURE #1: FREE VOICE PRINT VERIFY - For >₦10k transfers
-app.post("/verify-voiceprint", upload.single('voice'), async (req, res) => {
-  try {
-    const { userId } = req.body;
-    const newVoiceFile = req.file;
-    
-    if (!userId ||!newVoiceFile) {
-      return res.status(400).json({ error: "Missing userId or voice" });
-    }
-
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-    
-    const storedUrls = userDoc.data().voiceprint_urls;
-    if (!storedUrls || storedUrls.length === 0) {
-      return res.status(400).json({ error: "No voiceprint enrolled" });
-    }
-
-    const storedFile = bucket.file(storedUrls[0].replace(`gs://${bucket.name}/`, ''));
-    const [storedBuffer] = await storedFile.download();
-
-    const sizeDiff = Math.abs(storedBuffer.length - newVoiceFile.buffer.length) / storedBuffer.length;
-    const isMatch = sizeDiff < 0.5;
-
-    if (isMatch) {
-      res.json({ success: true, confidence: 0.85, message: "Voice verified ma" });
-    } else {
-      res.json({ success: false, confidence: 0.2, message: "Voice doesn't match. Try again ma" });
-    }
-
-  } catch (e) {
-    console.error("[VOICEPRINT] Error:", e);
-    res.status(500).json({ error: "Voice verification failed" });
-  }
-});
-
-// FEATURE #6: SPLIT BILL BY VOICE
-app.post("/split-bill", async (req, res) => {
-  try {
-    const { totalAmount, recipients, userId } = req.body;
-    if (!totalAmount ||!recipients || recipients.length === 0 ||!userId) {
-      return res.status(400).json({ error: "totalAmount, recipients array, and userId required" });
-    }
-
-    const amountPerPerson = Math.round(totalAmount / recipients.length);
-    const links = [];
-
-    for (const recipient of recipients) {
-      const merchantId = process.env.OPAY_MERCHANT_ID;
-      const secretKey = process.env.OPAY_SECRET_KEY;
-      const reference = `split_${Date.now()}_${recipient.substring(0, 4)}`;
-      const timestamp = Date.now().toString();
-
-      const opayPayload = {
-        merchantId: merchantId,
-        reference: reference,
-        amount: { currency: "NGN", total: Math.round(amountPerPerson * 100) },
-        callbackUrl: process.env.OPAY_CALLBACK_URL,
-        returnUrl: process.env.OPAY_RETURN_URL,
-        product: { name: "Harps Split Bill", description: `₦${amountPerPerson} from split` },
-        recipientAccount: { name: recipient, accountNumber: "" }
-      };
-
-      const stringToSign = JSON.stringify(opayPayload) + timestamp + secretKey;
-      const signature = crypto.createHash('sha512').update(stringToSign).digest('hex');
-
-      const response = await axios.post(
-        "https://sandbox.opaycheckout.com/api/v3/payment/link/create",
-        opayPayload,
-        {
-          headers: {
-            "Authorization": `Bearer ${merchantId}`,
-            "Content-Type": "application/json",
-            "Timestamp": timestamp,
-            "Signature": signature
-          }
-        }
-      );
-
-      if (response.data.code === "00000") {
-        links.push({ recipient, amount: amountPerPerson, paymentUrl: response.data.paymentUrl });
-      }
-    }
-
-    res.json({ success: true, splitAmount: amountPerPerson, links });
-
-  } catch (e) {
-    console.error("Split bill error:", e);
-    res.status(500).json({ error: "Failed to split bill" });
-  }
-});
-
-// FEATURE #7: VOICE RECEIPT / SPEAK BALANCE
-app.post("/speak-balance", async (req, res) => {
-  try {
-    const { userId } = req.body;
-    const transactions = await db.collection('transactions')
-   .where('userId', '==', userId)
-   .orderBy('created_at', 'desc')
-   .limit(5)
-   .get();
-    
-    let totalSpent = 0;
-    transactions.forEach(doc => totalSpent += doc.data().amount || 0);
-
-    res.json({ 
-      success: true, 
-      message: `You spent ₦${totalSpent.toLocaleString()} recently ma`,
-      totalSpent 
-    });
-
-  } catch (e) {
-    res.status(500).json({ error: "Failed to get balance" });
-  }
-});
-
-// VOICE-ONLY SIGNUP - No NIN needed
-app.post("/complete-signup", upload.array('voice', 3), async (req, res) => {
-  try {
-    const { userId, email, fullName, isStudent } = req.body;
-    const voiceFiles = req.files;
-
-    if (!userId ||!voiceFiles || voiceFiles.length!== 3) {
-      return res.status(400).json({ error: "Missing userId or voice samples" });
-    }
-
-    const voiceUrls = [];
-    for (let i = 0; i < voiceFiles.length; i++) {
-      const fileName = `voiceprints/${userId}/phrase_${i + 1}_${Date.now()}.webm`;
-      const file = bucket.file(fileName);
-      await file.save(voiceFiles[i].buffer, {
-        metadata: { contentType: 'audio/webm' }
-      });
-      voiceUrls.push(`gs://${bucket.name}/${fileName}`);
-    }
-
-    await db.collection('users').doc(userId).set({
-      email: email,
-      fullName: fullName || 'Harps User',
-      isStudent: isStudent === 'true',
-      daily_limit: isStudent === 'true'? 10000 : 1000000,
-      voiceprint_urls: voiceUrls,
-      voiceprint_created: Date.now(),
-      created_at: Date.now(),
-      status: 'active',
-      kyc_method: 'voice_biometric'
-    });
-
-    res.json({
-      success: true,
-      message: "Account created with voice biometrics",
-      isStudent: isStudent === 'true'
-    });
-
-  } catch (e) {
-    console.error("[SIGNUP] Error:", e.message);
-    res.status(500).json({ error: "Failed to complete signup" });
-  }
-});
-
-// CREATE OPAY LINK + STUDENT LIMIT CHECK - THIS IS WHERE OPAY PRE-FILL HAPPENS
+// CREATE OPAY LINK + STUDENT LIMIT CHECK
 app.post("/create-opay-link", async (req, res) => {
   try {
     const { amount, recipient, narration, userId, bank, account_number } = req.body;
@@ -339,16 +210,13 @@ app.post("/create-opay-link", async (req, res) => {
       return res.status(400).json({ error: "amount, recipient, and userId required" });
     }
 
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (userDoc.exists) {
-      const userData = userDoc.data();
-      if (userData.isStudent && amount > 10000) {
-        return res.status(403).json({
-          error: "Student accounts limited to ₦10,000 per transaction",
-          daily_limit: 10000,
-          isStudent: true
-        });
-      }
+    const userData = await getFromFirestore('users', userId);
+    if (userData && userData.isStudent && amount > 10000) {
+      return res.status(403).json({
+        error: "Student accounts limited to ₦10,000 per transaction",
+        daily_limit: 10000,
+        isStudent: true
+      });
     }
 
     const merchantId = process.env.OPAY_MERCHANT_ID;
@@ -387,7 +255,7 @@ app.post("/create-opay-link", async (req, res) => {
     );
 
     if (response.data.code === "00000") {
-      await db.collection('transactions').doc(reference).set({
+      await saveToFirestore('transactions', reference, {
         userId: userId,
         amount: amount,
         recipient: recipient,
@@ -403,35 +271,22 @@ app.post("/create-opay-link", async (req, res) => {
         reference: reference
       });
     } else {
-      res.status(400).json({ error: response.data.message || "Opay API error" });
+      res.status(400).json({ error: response.data.message || "Opay API error", opay_response: response.data });
     }
   } catch (e) {
     console.error("Link error:", e.response?.data || e.message);
-    res.status(500).json({ error: "Failed to create Opay payment link" });
+    res.status(500).json({ 
+      error: "Failed to create Opay payment link", 
+      debug: e.response?.data || e.message 
+    });
   }
 });
 
 app.get("/get-user/:userId", async (req, res) => {
   try {
-    const userDoc = await db.collection('users').doc(req.params.userId).get();
-    if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-    res.json(userDoc.data());
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.post("/dispute-transaction", async (req, res) => {
-  try {
-    const { reference, userId } = req.body;
-    await db.collection('disputes').add({
-      userId: userId,
-      transaction_ref: reference,
-      status: 'pending',
-      created_at: Date.now(),
-      reason: 'User reported via dashboard'
-    });
-    res.json({ success: true, message: "Dispute filed" });
+    const userData = await getFromFirestore('users', req.params.userId);
+    if (!userData) return res.status(404).json({ error: "User not found" });
+    res.json(userData);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -439,15 +294,10 @@ app.post("/dispute-transaction", async (req, res) => {
 
 app.get("/", (req, res) => res.json({
   status: "Harps VoicePay live",
-  version: "3.6 - Workload Identity + Grandma Mode",
+  version: "3.8 - No Admin SDK",
   features: [
-    "Zero-secret Firebase auth",
-    "VoicePrint authentication", 
+    "Firestore REST API",
     "Nigerian Elder Speech AI",
-    "Split Bill by Voice",
-    "Speak Balance",
-    "Yoruba/Hausa/Igbo support",
-    "Tone-based fraud detection",
     "Opay payment links",
     "Student ₦10k limits"
   ]
