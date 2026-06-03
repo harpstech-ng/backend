@@ -198,7 +198,7 @@ EXAMPLES:
   }
 });
 
-// CREATE OPAY LINK - DEBUGGED + FIXED
+// CREATE OPAY LINK - 02001 FIXED
 app.post("/create-opay-link", async (req, res) => {
   try {
     const { amount, recipient, narration, userId, bank, account_number } = req.body;
@@ -221,38 +221,40 @@ app.post("/create-opay-link", async (req, res) => {
     const reference = `harps_${Date.now()}_${userId.substring(0, 8)}`;
     const timestamp = Date.now().toString();
 
-    // FIX 1: Ensure callbackUrl exists - Opay rejects null/undefined
     const callbackUrl = process.env.OPAY_CALLBACK_URL || 'https://harps-voicepay.onrender.com/opay-callback';
     const returnUrl = process.env.OPAY_RETURN_URL || 'https://harpstech-ng.github.io/HarpsPay/dashboard.html';
 
-    // FIX 2: Opay cashier payload - ALL numbers must be strings
+    // FIX 1: Get clean single IP - no ports, no commas
+    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
+    const cleanIp = rawIp.split(',')[0].split(':')[0].trim() || '102.89.23.1';
+
+    // FIX 2: NO payMethod field at all - Opay rejects empty string
     const payload = {
       country: "NG",
       reference: reference,
-      amount: String(Math.round(amount * 100)), // Must be string
+      amount: String(Math.round(amount * 100)),
       currency: "NGN",
-      payMethod: "", // FIX 3: Empty string for all methods, not "bankaccount"
       productList: [
         {
           productId: "harps_transfer",
           name: "Harps VoicePay Transfer",
           description: narration || `Transfer to ${recipient}`,
-          price: String(Math.round(amount * 100)), // String
-          quantity: "1" // String
+          price: String(Math.round(amount * 100)),
+          quantity: "1"
         }
       ],
       returnUrl: returnUrl,
-      callbackUrl: callbackUrl, // FIX 4: Never undefined
-      userRequestIp: req.headers['x-forwarded-for'] || req.socket.remoteAddress || "127.0.0.1",
-      expireAt: "30" // String
+      callbackUrl: callbackUrl,
+      userRequestIp: cleanIp,
+      expireAt: "30"
     };
 
-    console.log('[OPAY] Payload to sign:', JSON.stringify(payload));
+    console.log('[OPAY] Payload:', JSON.stringify(payload));
     
     const stringToSign = JSON.stringify(payload) + timestamp + secretKey;
     const signature = crypto.createHash('sha512').update(stringToSign).digest('hex');
 
-    console.log('[OPAY] Headers:', { merchantId, timestamp, signature: signature.substring(0,20) + '...' });
+    console.log('[OPAY] Headers:', { merchantId, timestamp });
 
     const response = await axios.post(
       "https://sandboxapi.opaycheckout.com/api/v1/international/cashier/create",
@@ -264,7 +266,8 @@ app.post("/create-opay-link", async (req, res) => {
           "Content-Type": "application/json",
           "Timestamp": timestamp,
           "Signature": signature
-        }
+        },
+        timeout: 15000
       }
     );
 
@@ -287,14 +290,14 @@ app.post("/create-opay-link", async (req, res) => {
         reference: reference
       });
     } else {
-      console.error("Opay API Error:", response.data);
+      console.error("[OPAY] API Error:", response.data);
       res.status(400).json({ 
         error: response.data.message || "Opay API error", 
         opay_response: response.data 
       });
     }
   } catch (e) {
-    console.error("Link error:", e.response?.data || e.message);
+    console.error("[OPAY] Link error:", e.response?.data || e.message);
     res.status(500).json({ 
       error: "Failed to create Opay payment link", 
       debug: e.response?.data || e.message 
@@ -302,7 +305,6 @@ app.post("/create-opay-link", async (req, res) => {
   }
 });
 
-// Add dummy callback so Opay doesn't 404
 app.post("/opay-callback", (req, res) => {
   console.log('[OPAY] Callback received:', req.body);
   res.json({ status: "success" });
@@ -320,7 +322,7 @@ app.get("/get-user/:userId", async (req, res) => {
 
 app.get("/", (req, res) => res.json({
   status: "Harps VoicePay live",
-  version: "4.3 - Opay 02001 Fixed",
+  version: "4.5 - Opay 02001 Final",
   features: [
     "Firestore REST API",
     "Nigerian Elder Speech AI",
