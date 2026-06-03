@@ -111,6 +111,7 @@ CRITICAL NIGERIAN ELDER SPEECH RULES:
 14. ALWAYS use ₦ Naira, never $
 15. Be respectful: Use "ma" or "sir" for elders
 16. Return ONLY valid JSON, no extra text
+【6566541442665474331†L281-L283】
 
 Output JSON: {"intent":"transfer|pay_bill|buy_airtime|split_bill|check_balance|chitchat|unknown","amount":number,"recipient":string,"language_detected":"en|yo|ha|ig|pcm","tone":"calm|rushed|stressed","confidence":0-1,"response":"short respectful reply under 12 words","needs_confirmation":boolean}
 
@@ -201,7 +202,7 @@ EXAMPLES:
   }
 });
 
-// CREATE OPAY LINK + STUDENT LIMIT CHECK - FIXED URL
+// CREATE OPAY LINK + STUDENT LIMIT CHECK - REAL OPAY SANDBOX URL
 app.post("/create-opay-link", async (req, res) => {
   try {
     const { amount, recipient, narration, userId, bank, account_number } = req.body;
@@ -241,9 +242,9 @@ app.post("/create-opay-link", async (req, res) => {
     const stringToSign = JSON.stringify(payload) + timestamp + secretKey;
     const signature = crypto.createHash('sha512').update(stringToSign).digest('hex');
 
-    // FIXED: Real Opay Sandbox URL
+    // REAL OPAY SANDBOX URL FOR CASHIER/PAYMENT LINK
     const response = await axios.post(
-      "https://testapi.opayweb.com/api/v3/payment/link/create",
+      "https://sandboxapi.opaycheckout.com/api/v3/payment/link/create",
       payload,
       {
         headers: {
@@ -266,7 +267,7 @@ app.post("/create-opay-link", async (req, res) => {
         created_at: Date.now()
       });
 
-      // FIXED: Handle both response formats from Opay
+      // Handle both response formats from Opay
       const paymentUrl = response.data.data?.linkUrl || response.data.paymentUrl;
       
       res.json({
@@ -298,7 +299,7 @@ app.get("/get-user/:userId", async (req, res) => {
 
 app.get("/", (req, res) => res.json({
   status: "Harps VoicePay live",
-  version: "3.9 - Fixed Opay URL",
+  version: "4.0 - Real Opay Sandbox",
   features: [
     "Firestore REST API",
     "Nigerian Elder Speech AI",
