@@ -4,7 +4,9 @@ import dotenv from "dotenv";
 import crypto from "crypto";
 import axios from "axios";
 import Groq from "groq-sdk";
-import admin from "firebase-admin";
+import { initializeApp, applicationDefault } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { getStorage } from 'firebase-admin/storage';
 import multer from "multer";
 
 dotenv.config();
@@ -20,16 +22,15 @@ app.options('*', cors());
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-admin.initializeApp({
-  credential: admin.credential.cert({
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
-  }),
+// FIREBASE INIT - OPTION 2: WORKLOAD IDENTITY - NO KEYS NEEDED
+initializeApp({
+  credential: applicationDefault(),
+  projectId: process.env.FIREBASE_PROJECT_ID,
   storageBucket: process.env.FIREBASE_STORAGE_BUCKET
 });
-const db = admin.firestore();
-const storage = admin.storage();
+
+const db = getFirestore();
+const storage = getStorage();
 const bucket = storage.bucket();
 
 const upload = multer({
@@ -190,9 +191,8 @@ app.post("/verify-voiceprint", upload.single('voice'), async (req, res) => {
     const storedFile = bucket.file(storedUrls[0].replace(`gs://${bucket.name}/`, ''));
     const [storedBuffer] = await storedFile.download();
 
-    // Free comparison: file size ratio - works for 90% of spoof attempts
     const sizeDiff = Math.abs(storedBuffer.length - newVoiceFile.buffer.length) / storedBuffer.length;
-    const isMatch = sizeDiff < 0.5; // 50% tolerance for elders
+    const isMatch = sizeDiff < 0.5;
 
     if (isMatch) {
       res.json({ success: true, confidence: 0.85, message: "Voice verified ma" });
@@ -206,7 +206,7 @@ app.post("/verify-voiceprint", upload.single('voice'), async (req, res) => {
   }
 });
 
-// FEATURE #6: SPLIT BILL BY VOICE - "Split 15k for Seyi, Tunde, Mama"
+// FEATURE #6: SPLIT BILL BY VOICE
 app.post("/split-bill", async (req, res) => {
   try {
     const { totalAmount, recipients, userId } = req.body;
@@ -267,10 +267,10 @@ app.post("/speak-balance", async (req, res) => {
   try {
     const { userId } = req.body;
     const transactions = await db.collection('transactions')
-    .where('userId', '==', userId)
-    .orderBy('created_at', 'desc')
-    .limit(5)
-    .get();
+   .where('userId', '==', userId)
+   .orderBy('created_at', 'desc')
+   .limit(5)
+   .get();
     
     let totalSpent = 0;
     transactions.forEach(doc => totalSpent += doc.data().amount || 0);
@@ -330,7 +330,7 @@ app.post("/complete-signup", upload.array('voice', 3), async (req, res) => {
   }
 });
 
-// CREATE OPAY LINK + STUDENT LIMIT CHECK
+// CREATE OPAY LINK + STUDENT LIMIT CHECK - THIS IS WHERE OPAY PRE-FILL HAPPENS
 app.post("/create-opay-link", async (req, res) => {
   try {
     const { amount, recipient, narration, userId, bank, account_number } = req.body;
@@ -439,9 +439,10 @@ app.post("/dispute-transaction", async (req, res) => {
 
 app.get("/", (req, res) => res.json({
   status: "Harps VoicePay live",
-  version: "3.3 - Grandma Mode + Voice Print",
+  version: "3.6 - Workload Identity + Grandma Mode",
   features: [
-    "VoicePrint authentication",
+    "Zero-secret Firebase auth",
+    "VoicePrint authentication", 
     "Nigerian Elder Speech AI",
     "Split Bill by Voice",
     "Speak Balance",
