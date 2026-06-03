@@ -23,7 +23,6 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
 const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
 
-// Helper to save to Firestore without Admin SDK
 async function saveToFirestore(collection, docId, data) {
   const url = `${FIRESTORE_URL}/${collection}/${docId}`;
   const firestoreData = {
@@ -45,7 +44,6 @@ async function saveToFirestore(collection, docId, data) {
   }
 }
 
-// Helper to get from Firestore
 async function getFromFirestore(collection, docId) {
   try {
     const url = `${FIRESTORE_URL}/${collection}/${docId}`;
@@ -84,7 +82,6 @@ async function chat(prompt) {
   return completion.choices[0]?.message?.content || "";
 }
 
-// VOICE PARSING - NIGERIAN GRANDMA MODE - ZERO CONFUSION
 app.post("/parse", async (req, res) => {
   try {
     const { transcript } = req.body;
@@ -111,7 +108,6 @@ CRITICAL NIGERIAN ELDER SPEECH RULES:
 14. ALWAYS use ₦ Naira, never $
 15. Be respectful: Use "ma" or "sir" for elders
 16. Return ONLY valid JSON, no extra text
-【6566541442665474331†L281-L283】
 
 Output JSON: {"intent":"transfer|pay_bill|buy_airtime|split_bill|check_balance|chitchat|unknown","amount":number,"recipient":string,"language_detected":"en|yo|ha|ig|pcm","tone":"calm|rushed|stressed","confidence":0-1,"response":"short respectful reply under 12 words","needs_confirmation":boolean}
 
@@ -202,7 +198,7 @@ EXAMPLES:
   }
 });
 
-// CREATE OPAY LINK + STUDENT LIMIT CHECK - REAL OPAY SANDBOX URL
+// CREATE OPAY LINK - CORRECT SANDBOX ENDPOINT + PAYLOAD
 app.post("/create-opay-link", async (req, res) => {
   try {
     const { amount, recipient, narration, userId, bank, account_number } = req.body;
@@ -225,30 +221,39 @@ app.post("/create-opay-link", async (req, res) => {
     const reference = `harps_${Date.now()}_${userId.substring(0, 8)}`;
     const timestamp = Date.now().toString();
 
+    // OPAY SANDBOX CASHIER PAYLOAD - matches their docs
     const payload = {
-      merchantId: merchantId,
+      country: "NG",
       reference: reference,
-      amount: { currency: "NGN", total: Math.round(amount * 100) },
-      callbackUrl: process.env.OPAY_CALLBACK_URL,
+      amount: Math.round(amount * 100), // kobo
+      currency: "NGN",
+      payMethod: "",
+      productList: [
+        {
+          productId: "harps_transfer",
+          name: "Harps VoicePay Transfer",
+          description: narration || `Transfer to ${recipient}`,
+          price: Math.round(amount * 100),
+          quantity: 1
+        }
+      ],
       returnUrl: process.env.OPAY_RETURN_URL || 'https://harpstech-ng.github.io/HarpsPay/dashboard.html',
-      userInfo: { userId: userId },
-      product: {
-        name: "Harps VoicePay Transfer",
-        description: narration || `Transfer to ${recipient}`
-      },
-      recipientAccount: { name: recipient, accountNumber: account_number || "" }
+      callbackUrl: process.env.OPAY_CALLBACK_URL,
+      userClientIP: req.ip || "127.0.0.1",
+      expireAt: 30 // 30 minutes
     };
 
     const stringToSign = JSON.stringify(payload) + timestamp + secretKey;
     const signature = crypto.createHash('sha512').update(stringToSign).digest('hex');
 
-    // REAL OPAY SANDBOX URL FOR CASHIER/PAYMENT LINK
+    // CORRECT OPAY SANDBOX URL FOR CASHIER
     const response = await axios.post(
-      "https://sandboxapi.opaycheckout.com/api/v3/payment/link/create",
+      "https://sandboxapi.opaycheckout.com/api/v1/international/cashier/create",
       payload,
       {
         headers: {
-          "Authorization": `Bearer ${merchantId}`,
+          "Authorization": `Bearer ${secretKey}`,
+          "MerchantId": merchantId,
           "Content-Type": "application/json",
           "Timestamp": timestamp,
           "Signature": signature
@@ -267,12 +272,9 @@ app.post("/create-opay-link", async (req, res) => {
         created_at: Date.now()
       });
 
-      // Handle both response formats from Opay
-      const paymentUrl = response.data.data?.linkUrl || response.data.paymentUrl;
-      
       res.json({
         success: true,
-        paymentUrl: paymentUrl,
+        paymentUrl: response.data.data?.cashierUrl,
         reference: reference
       });
     } else {
@@ -299,11 +301,11 @@ app.get("/get-user/:userId", async (req, res) => {
 
 app.get("/", (req, res) => res.json({
   status: "Harps VoicePay live",
-  version: "4.0 - Real Opay Sandbox",
+  version: "4.1 - Opay Cashier Sandbox",
   features: [
     "Firestore REST API",
     "Nigerian Elder Speech AI",
-    "Opay payment links",
+    "Opay Cashier Links",
     "Student ₦10k limits"
   ]
 }));
