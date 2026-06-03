@@ -198,7 +198,7 @@ EXAMPLES:
   }
 });
 
-// CREATE OPAY LINK - CORRECT SANDBOX ENDPOINT + PAYLOAD
+// CREATE OPAY LINK - FIXED FOR OPAY 02001 ERROR
 app.post("/create-opay-link", async (req, res) => {
   try {
     const { amount, recipient, narration, userId, bank, account_number } = req.body;
@@ -221,38 +221,37 @@ app.post("/create-opay-link", async (req, res) => {
     const reference = `harps_${Date.now()}_${userId.substring(0, 8)}`;
     const timestamp = Date.now().toString();
 
-    // OPAY SANDBOX CASHIER PAYLOAD - matches their docs
+    // FIX: Opay requires ALL numbers as strings
     const payload = {
       country: "NG",
       reference: reference,
-      amount: Math.round(amount * 100), // kobo
+      amount: Math.round(amount * 100).toString(), // String not number
       currency: "NGN",
-      payMethod: "",
+      payMethod: "bankaccount", // Required
       productList: [
         {
           productId: "harps_transfer",
           name: "Harps VoicePay Transfer",
           description: narration || `Transfer to ${recipient}`,
-          price: Math.round(amount * 100),
-          quantity: 1
+          price: Math.round(amount * 100).toString(), // String
+          quantity: "1" // String
         }
       ],
       returnUrl: process.env.OPAY_RETURN_URL || 'https://harpstech-ng.github.io/HarpsPay/dashboard.html',
       callbackUrl: process.env.OPAY_CALLBACK_URL,
-      userClientIP: req.ip || "127.0.0.1",
-      expireAt: 30 // 30 minutes
+      userRequestIp: req.ip || "127.0.0.1", // Correct field name
+      expireAt: "30" // String not number
     };
 
     const stringToSign = JSON.stringify(payload) + timestamp + secretKey;
     const signature = crypto.createHash('sha512').update(stringToSign).digest('hex');
 
-    // CORRECT OPAY SANDBOX URL FOR CASHIER
     const response = await axios.post(
       "https://sandboxapi.opaycheckout.com/api/v1/international/cashier/create",
       payload,
       {
         headers: {
-          "Authorization": `Bearer ${secretKey}`,
+          "Authorization": `Bearer ${secretKey}`, // Use secretKey
           "MerchantId": merchantId,
           "Content-Type": "application/json",
           "Timestamp": timestamp,
@@ -278,7 +277,11 @@ app.post("/create-opay-link", async (req, res) => {
         reference: reference
       });
     } else {
-      res.status(400).json({ error: response.data.message || "Opay API error", opay_response: response.data });
+      console.error("Opay API Error:", response.data);
+      res.status(400).json({ 
+        error: response.data.message || "Opay API error", 
+        opay_response: response.data 
+      });
     }
   } catch (e) {
     console.error("Link error:", e.response?.data || e.message);
@@ -301,7 +304,7 @@ app.get("/get-user/:userId", async (req, res) => {
 
 app.get("/", (req, res) => res.json({
   status: "Harps VoicePay live",
-  version: "4.1 - Opay Cashier Sandbox",
+  version: "4.2 - Opay Fixed",
   features: [
     "Firestore REST API",
     "Nigerian Elder Speech AI",
