@@ -15,6 +15,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json({ limit: '10mb' }));
+app.use(express.static('.')); // ADDED: Serve mock-opay.html + index.html
 app.options('*', cors());
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -36,7 +37,7 @@ async function saveToFirestore(collection, docId, data) {
       return acc;
     }, {})
   };
-  
+
   try {
     await axios.patch(url, firestoreData);
   } catch (e) {
@@ -102,30 +103,30 @@ CRITICAL NIGERIAN ELDER SPEECH RULES:
 8. Hausa: "Tura dubu biyar zuwa Amina" = Send 5000 to Amina. "Ina son in tura kudi" = I want to send money
 9. Igbo: "Ziga puku ego na Chioma" = Send 1000 to Chioma
 10. Pidgin: "Abeg send Seyi 5k make I see" = transfer 5000 to Seyi. "Dash Mama 2k" = transfer 2000 to Mama
-11. If amount missing but name present: Ask "How much to NAME ma?"
-12. If name missing but amount present: Ask "Send ₦AMOUNT to who ma?"
-13. If both missing: Ask "Who do you want to send money to ma?"
+11. If amount missing but name present: Ask "How much to NAME, please?"
+12. If name missing but amount present: Ask "Send ₦AMOUNT to who, please?"
+13. If both missing: Ask "Who do you want to send money to, please?"
 14. ALWAYS use ₦ Naira, never $
-15. Be respectful: Use "ma" or "sir" for elders
+15. Be respectful: Use "please" for elders
 16. Return ONLY valid JSON, no extra text
 
 Output JSON: {"intent":"transfer|pay_bill|buy_airtime|split_bill|check_balance|chitchat|unknown","amount":number,"recipient":string,"language_detected":"en|yo|ha|ig|pcm","tone":"calm|rushed|stressed","confidence":0-1,"response":"short respectful reply under 12 words","needs_confirmation":boolean}
 
 EXAMPLES:
-"Ehhm... send... five... to... my daughter" → {"intent":"transfer","amount":5000,"recipient":"daughter","confidence":0.7,"response":"Send ₦5,000 to your daughter ma?","needs_confirmation":true,"language_detected":"en"}
-"Fi 2k ranṣẹ" → {"intent":"transfer","amount":2000,"recipient":null,"confidence":0.6,"response":"Send ₦2,000 to who ma?","needs_confirmation":true,"language_detected":"yo"}
-"Bawo ni" → {"intent":"chitchat","confidence":1.0,"response":"Good morning ma. How can I help?","language_detected":"yo"}
-"My pikin, I wan send ten" → {"intent":"transfer","amount":10000,"recipient":null,"confidence":0.6,"response":"Send ₦10,000 to who ma?","needs_confirmation":true,"language_detected":"pcm"}
-"Check balance" → {"intent":"check_balance","confidence":1.0,"response":"Checking your balance ma"}
-"Send five Kissy shoes" → {"intent":"transfer","amount":5000,"recipient":"Kissy","confidence":0.6,"response":"Send ₦5,000 to Kissy ma?","needs_confirmation":true}
-"Tura dubu biyu" → {"intent":"transfer","amount":2000,"recipient":null,"confidence":0.6,"response":"Send ₦2,000 to who ma?","needs_confirmation":true,"language_detected":"ha"}`;
+"Ehhm... send... five... to... my daughter" → {"intent":"transfer","amount":5000,"recipient":"daughter","confidence":0.7,"response":"Send ₦5,000 to your daughter, please?","needs_confirmation":true,"language_detected":"en"}
+"Fi 2k ranṣẹ" → {"intent":"transfer","amount":2000,"recipient":null,"confidence":0.6,"response":"Send ₦2,000 to who, please?","needs_confirmation":true,"language_detected":"yo"}
+"Bawo ni" → {"intent":"chitchat","confidence":1.0,"response":"Good morning. How can I help?","language_detected":"yo"}
+"My pikin, I wan send ten" → {"intent":"transfer","amount":10000,"recipient":null,"confidence":0.6,"response":"Send ₦10,000 to who, please?","needs_confirmation":true,"language_detected":"pcm"}
+"Check balance" → {"intent":"check_balance","confidence":1.0,"response":"Checking your balance"}
+"Send five Kissy shoes" → {"intent":"transfer","amount":5000,"recipient":"Kissy","confidence":0.6,"response":"Send ₦5,000 to Kissy, please?","needs_confirmation":true}
+"Tura dubu biyu" → {"intent":"transfer","amount":2000,"recipient":null,"confidence":0.6,"response":"Send ₦2,000 to who, please?","needs_confirmation":true,"language_detected":"ha"}`;
 
     const text = await chat(`${SYSTEM_PROMPT}\n\nUser speech: "${transcript}"`);
     console.log('[HARPS] Groq raw:', text);
     let json = extractJSON(text.trim());
 
     if (json.intent === "chitchat") {
-      json.response = json.response || "Good morning ma. How can I help?";
+      json.response = json.response || "Good morning. How can I help?";
       json.needs_confirmation = false;
       json.confidence = 1.0;
       return res.json(json);
@@ -133,7 +134,7 @@ EXAMPLES:
 
     if (json.intent === "check_balance") {
       json.needs_confirmation = false;
-      json.response = "Tap 'Check Balance' to view ma";
+      json.response = "Tap 'Check Balance' to view";
       return res.json(json);
     }
 
@@ -142,43 +143,43 @@ EXAMPLES:
         json.confidence = 0.3;
         json.needs_confirmation = true;
         json.intent = "unknown";
-        json.response = `Who do you want to send money to ma?`;
+        json.response = `Who do you want to send money to, please?`;
       } else if (!json.amount) {
         json.confidence = 0.5;
         json.needs_confirmation = true;
-        json.response = `How much to ${json.recipient} ma?`;
+        json.response = `How much to ${json.recipient}, please?`;
       } else if (!json.recipient) {
         json.confidence = 0.5;
         json.needs_confirmation = true;
-        json.response = `Send ₦${json.amount.toLocaleString()} to who ma?`;
+        json.response = `Send ₦${json.amount.toLocaleString()} to who, please?`;
       } else if (json.confidence >= 0.7) {
         json.needs_confirmation = false;
-        json.response = `Send ₦${json.amount.toLocaleString()} to ${json.recipient} ma?`;
+        json.response = `Send ₦${json.amount.toLocaleString()} to ${json.recipient}, please?`;
       } else {
         json.needs_confirmation = true;
-        json.response = `Send ₦${json.amount.toLocaleString()} to ${json.recipient} ma?`;
+        json.response = `Send ₦${json.amount.toLocaleString()} to ${json.recipient}, please?`;
       }
     } else if (json.intent === "buy_airtime") {
       if (!json.amount) {
         json.confidence = 0.4;
         json.needs_confirmation = true;
-        json.response = `How much airtime ma?`;
+        json.response = `How much airtime, please?`;
       } else {
         json.needs_confirmation = false;
-        json.response = `Buy ₦${json.amount.toLocaleString()} airtime ma?`;
+        json.response = `Buy ₦${json.amount.toLocaleString()} airtime, please?`;
       }
     } else {
       json.confidence = 0.2;
       json.needs_confirmation = true;
       json.intent = "unknown";
-      json.response = `Say 'Send 5000 to Seyi' ma`;
+      json.response = `Say 'Send 5000 to Seyi', please`;
     }
 
     if (["stressed", "rushed"].includes(json.tone) && json.intent === "transfer" && json.amount > 50000) {
       json.requires_extra_verification = true;
       json.requires_selfie = true;
       json.fraud_risk = "high";
-      json.response = `Voice stress on ₦${json.amount.toLocaleString()}. Selfie needed ma.`;
+      json.response = `Voice stress on ₦${json.amount.toLocaleString()}. Selfie needed.`;
     } else if (["stressed", "rushed"].includes(json.tone) && json.intent === "transfer") {
       json.requires_extra_verification = true;
       json.fraud_risk = "medium";
@@ -190,7 +191,7 @@ EXAMPLES:
     console.error("[HARPS] Parse error:", e);
     res.status(500).json({
       error: e.message,
-      response: "Try again ma. Say: 'Send 5000 to Seyi'",
+      response: "Try again. Say: 'Send 5000 to Seyi'",
       needs_confirmation: true,
       intent: "unknown",
       confidence: 0
@@ -222,12 +223,12 @@ app.post("/create-opay-link", async (req, res) => {
 
     // ===== MOCK MODE - JUDGES SAFE MODE =====
     // Set FORCE_MOCK = false when Opay gives you new key without decimal
-    const FORCE_MOCK = true; 
+    const FORCE_MOCK = true;
     const KEY_IS_BROKEN = secretKey && secretKey.includes('.');
-    
+
     if (FORCE_MOCK || KEY_IS_BROKEN) {
       console.log('[MOCK] Opay key broken or forced mock. Bypassing real API.');
-      
+
       await saveToFirestore('transactions', reference, {
         userId: userId,
         amount: amount,
@@ -283,7 +284,7 @@ app.post("/create-opay-link", async (req, res) => {
     };
 
     console.log('[OPAY] Payload:', JSON.stringify(payload));
-    
+
     const stringToSign = JSON.stringify(payload) + timestamp + secretKey;
     const signature = crypto.createHash('sha512').update(stringToSign).digest('hex');
 
@@ -324,16 +325,16 @@ app.post("/create-opay-link", async (req, res) => {
       });
     } else {
       console.error("[OPAY] API Error:", response.data);
-      res.status(400).json({ 
-        error: response.data.message || "Opay API error", 
-        opay_response: response.data 
+      res.status(400).json({
+        error: response.data.message || "Opay API error",
+        opay_response: response.data
       });
     }
   } catch (e) {
     console.error("[OPAY] Link error:", e.response?.data || e.message);
-    res.status(500).json({ 
-      error: "Failed to create Opay payment link", 
-      debug: e.response?.data || e.message 
+    res.status(500).json({
+      error: "Failed to create Opay payment link",
+      debug: e.response?.data || e.message
     });
   }
 });
@@ -358,7 +359,7 @@ app.get("/", (req, res) => res.json({
   version: "4.6 - Opay Mock Mode Ready",
   features: [
     "Firestore REST API",
-    "Nigerian Elder Speech AI", 
+    "Nigerian Elder Speech AI",
     "Opay Cashier Links",
     "Student ₦10k limits",
     "Mock Mode for Sandbox Issues"
