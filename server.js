@@ -20,45 +20,38 @@ app.options('*', cors());
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// FIREBASE REST API - NO ADMIN SDK NEEDED
-const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
-const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents`;
+// HARPS EDIT: MEMORY STORAGE FOR HACKATHON - NO FIREBASE KEYS
+global.VOICE_MEMORY = {}; // userId -> { voiceVector, duressVector, voiceFeatures, duressPhrase, email, fullName, isStudent, locked }
+global.TRANSACTION_MEMORY = {}; // reference -> transaction data
+global.DURESS_MEMORY = {}; // logId -> duress logs
 
+// HARPS EDIT: REPLACED FIREBASE WITH MEMORY
 async function saveToFirestore(collection, docId, data) {
-  const url = `${FIRESTORE_URL}/${collection}/${docId}`;
-  const firestoreData = {
-    fields: Object.keys(data).reduce((acc, key) => {
-      const value = data[key];
-      if (typeof value === 'string') acc[key] = { stringValue: value };
-      else if (typeof value === 'number') acc[key] = { integerValue: value.toString() };
-      else if (typeof value === 'boolean') acc[key] = { booleanValue: value };
-      else if (Array.isArray(value)) acc[key] = { arrayValue: { values: value.map(v => ({ stringValue: v })) } };
-      else if (value === null) acc[key] = { nullValue: null };
-      else acc[key] = { stringValue: JSON.stringify(value) };
-      return acc;
-    }, {})
-  };
-
-  try {
-    await axios.patch(url, firestoreData);
-  } catch (e) {
-    console.error('Firestore save error:', e.response?.data || e.message);
+  if (collection === 'users') {
+    global.VOICE_MEMORY[docId] = {...global.VOICE_MEMORY[docId],...data };
+    console.log(`[MEMORY] Saved user ${docId}`);
+  } else if (collection === 'transactions') {
+    global.TRANSACTION_MEMORY[docId] = data;
+    console.log(`[MEMORY] Saved transaction ${docId}`);
+  } else if (collection === 'duress_logs') {
+    global.DURESS_MEMORY[docId] = data;
+    console.log(`[MEMORY] Saved duress log ${docId}`);
   }
+  // Don't call Firebase anymore - just return
+  return;
 }
 
+// HARPS EDIT: REPLACED FIREBASE WITH MEMORY
 async function getFromFirestore(collection, docId) {
   try {
-    const url = `${FIRESTORE_URL}/${collection}/${docId}`;
-    const res = await axios.get(url);
-    const fields = res.data.fields;
-    const data = {};
-    for (const key in fields) {
-      if (fields[key].stringValue) data[key] = fields[key].stringValue;
-      else if (fields[key].integerValue) data[key] = parseInt(fields[key].integerValue);
-      else if (fields[key].booleanValue) data[key] = fields[key].booleanValue;
-      else if (fields[key].arrayValue) data[key] = fields[key].arrayValue.values?.map(v => v.stringValue) || [];
+    if (collection === 'users') {
+      return global.VOICE_MEMORY[docId] || null;
+    } else if (collection === 'transactions') {
+      return global.TRANSACTION_MEMORY[docId] || null;
+    } else if (collection === 'duress_logs') {
+      return global.DURESS_MEMORY[docId] || null;
     }
-    return data;
+    return null;
   } catch (e) {
     return null;
   }
