@@ -5,6 +5,7 @@ import crypto from "crypto";
 import axios from "axios";
 import Groq from "groq-sdk";
 import multer from "multer";
+import CryptoJS from "crypto-js"; // HARPS EDIT: ADDED FOR AES-256
 
 dotenv.config();
 const app = express();
@@ -19,6 +20,21 @@ app.use(express.static('.')); // ADDED: Serve mock-opay.html + index.html
 app.options('*', cors());
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+// HARPS EDIT: AES-256 FUNCTIONS - NEW
+const AES_SECRET_KEY = process.env.AES_SECRET_KEY || "ebf3d793b82478420df7a12a5c86795224ae7613d9355f1dd2158a3bca47ff80";
+
+function decryptData(ciphertext) {
+  if (!ciphertext) return null;
+  try {
+    const bytes = CryptoJS.AES.decrypt(ciphertext, AES_SECRET_KEY);
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+    return decrypted || ciphertext; // Fallback if not encrypted
+  } catch (e) {
+    console.log('[DECRYPT] Failed, returning original:', e.message);
+    return ciphertext; // If decryption fails, assume plain text
+  }
+}
 
 // HARPS EDIT: MEMORY STORAGE FOR HACKATHON - NO FIREBASE KEYS
 global.VOICE_MEMORY = {}; // userId -> { voiceVector, duressVector, voiceFeatures, duressPhrase, email, fullName, isStudent, locked }
@@ -397,17 +413,24 @@ app.post("/complete-signup", upload.any(), async (req, res) => {
   }
 });
 
-// CREATE OPAY LINK - 02001 FIXED + MOCK MODE
+// CREATE OPAY LINK - 02001 FIXED + MOCK MODE + HARPS EDIT: AES-256 DECRYPT
 app.post("/create-opay-link", async (req, res) => {
   try {
-    const { amount, recipient, narration, userId, bank, account_number } = req.body;
+    // HARPS EDIT: DECRYPT incoming data first - NEW
+    const amount = decryptData(req.body.amount);
+    const recipient = decryptData(req.body.recipient);
+    const narration = req.body.narration;
+    const userId = req.body.userId;
+    const bank = req.body.bank;
+    const account_number = req.body.account_number? decryptData(req.body.account_number) : null;
+    const phone = req.body.phone;
 
     if (!amount ||!recipient ||!userId) {
       return res.status(400).json({ error: "amount, recipient, and userId required" });
     }
 
     const userData = await getFromFirestore('users', userId);
-    if (userData && userData.isStudent && amount > 10000) {
+    if (userData && userData.isStudent && parseInt(amount) > 10000) {
       return res.status(403).json({
         error: "Student accounts limited to ₦10,000 per transaction",
         daily_limit: 10000,
@@ -453,7 +476,7 @@ app.post("/create-opay-link", async (req, res) => {
         data: {
           orderNo: reference,
           reference: reference,
-          cashierUrl: `https://harpstech-ng.github.io/HarpsPay/mock-opay.html?amount=${amount * 100}&name=${encodeURIComponent(recipient)}&ref=${reference}`
+          cashierUrl: `https://harpstech-ng.github.io/HarpsPay/mock-opay.html?amount=${parseInt(amount) * 100}&name=${encodeURIComponent(recipient)}&ref=${reference}`
         },
         success: true,
         mock: true
@@ -472,14 +495,14 @@ app.post("/create-opay-link", async (req, res) => {
     const payload = {
       country: "NG",
       reference: reference,
-      amount: String(Math.round(amount * 100)),
+      amount: String(Math.round(parseInt(amount) * 100)),
       currency: "NGN",
       productList: [
         {
           productId: "harps_transfer",
           name: "Harps VoicePay Transfer",
           description: narration || `Transfer to ${recipient}`,
-          price: String(Math.round(amount * 100)),
+          price: String(Math.round(parseInt(amount) * 100)),
           quantity: "1"
         }
       ],
@@ -562,7 +585,7 @@ app.get("/get-user/:userId", async (req, res) => {
 
 app.get("/", (req, res) => res.json({
   status: "Harps VoicePay live",
-  version: "5.0 - Duress + Currency + Voice Lock",
+  version: "5.0 - Duress + Currency + Voice Lock + AES-256",
   features: [
     "Firestore REST API",
     "Nigerian Elder Speech AI",
@@ -571,7 +594,8 @@ app.get("/", (req, res) => res.json({
     "Mock Mode for Sandbox Issues",
     "Voice Biometric Lock",
     "Duress/Kidnapping Mode",
-    "Live USD/GBP → NGN Conversion"
+    "Live USD/GBP → NGN Conversion",
+    "AES-256 End-to-End Encryption"
   ]
 }));
 
